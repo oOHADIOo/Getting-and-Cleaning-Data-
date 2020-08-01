@@ -1,49 +1,169 @@
-# load libraries
-library(dplyr) 
+The zip file containing the data can be downloaded here: Assignment 3 Data
 
-# set dataset directory
-setwd("UCI HAR Dataset")
+Part 1 Plot the 30-day mortality rates for heart attack (outcome.R)
+# install.packages("data.table")
+library("data.table")
 
-# read train data 
-x_train   <- read.table("./train/X_train.txt")
-y_train   <- read.table("./train/Y_train.txt") 
-sub_train <- read.table("./train/subject_train.txt")
+# Reading in data
+outcome <- data.table::fread('outcome-of-care-measures.csv')
+outcome[, (11) := lapply(.SD, as.numeric), .SDcols = (11)]
+outcome[, lapply(.SD
+                 , hist
+                 , xlab= "Deaths"
+                 , main = "Hospital 30-Day Death (Mortality) Rates from Heart Attack"
+                 , col="lightblue")
+        , .SDcols = (11)]
 
-# read test data 
-x_test   <- read.table("./test/X_test.txt")
-y_test   <- read.table("./test/Y_test.txt") 
-sub_test <- read.table("./test/subject_test.txt")
 
-# read features description 
-features <- read.table("./features.txt") 
+Part 2 Finding the best hospital in a state (best.R)
+best <- function(state, outcome) {
+  
+  # Read outcome data
+  out_dt <- data.table::fread('outcome-of-care-measures.csv')
+  
+  outcome <- tolower(outcome)
+  
+  # Column name is same as variable so changing it 
+  chosen_state <- state 
 
-# read activity labels 
-activity_labels <- read.table("./activity_labels.txt") 
+  # Check that state and outcome are valid
+  if (!chosen_state %in% unique(out_dt[["State"]])) {
+    stop('invalid state')
+  }
+  
+  if (!outcome %in% c("heart attack", "heart failure", "pneumonia")) {
+    stop('invalid outcome')
+  }
+  
+  # Renaming Columns to be less verbose and lowercase
+  setnames(out_dt
+           , tolower(sapply(colnames(out_dt), gsub, pattern = "^Hospital 30-Day Death \\(Mortality\\) Rates from ", replacement = "" ))
+  )
+  
+  #Filter by state
+  out_dt <- out_dt[state == chosen_state]
+  
+  # Columns indices to keep
+  col_indices <- grep(paste0("hospital name|state|^",outcome), colnames(out_dt))
+  
+  # Filtering out unnessecary data 
+  out_dt <- out_dt[, .SD ,.SDcols = col_indices]
+  
+  # Find out what class each column is 
+  # sapply(out_dt,class)
+  out_dt[, outcome] <- out_dt[,  as.numeric(get(outcome))]
+  
+  
+  # Removing Missing Values for numerical datatype (outcome column)
+  out_dt <- out_dt[complete.cases(out_dt),]
+  
+  # Order Column to Top 
+  out_dt <- out_dt[order(get(outcome), `hospital name`)]
+  
+  return(out_dt[, "hospital name"][1])
 
-# merge of training and test sets
-x_total   <- rbind(x_train, x_test)
-y_total   <- rbind(y_train, y_test) 
-sub_total <- rbind(sub_train, sub_test) 
+}
+Part 3 Ranking hospitals by outcome in a state (rankhospital.R)
+rankhospital <- function(state, outcome, num = "best") {
+  
+  # Read outcome data
+  out_dt <- data.table::fread('outcome-of-care-measures.csv')
+  
+  outcome <- tolower(outcome)
+  
+  # Column name is same as variable so changing it 
+  chosen_state <- state 
+  
+  # Check that state and outcome are valid
+  if (!chosen_state %in% unique(out_dt[["State"]])) {
+    stop('invalid state')
+  }
+  
+  if (!outcome %in% c("heart attack", "heart failure", "pneumonia")) {
+    stop('invalid outcome')
+  }
+  
+  # Renaming Columns to be less verbose and lowercase
+  setnames(out_dt
+           , tolower(sapply(colnames(out_dt), gsub, pattern = "^Hospital 30-Day Death \\(Mortality\\) Rates from ", replacement = "" ))
+  )
+  
+  #Filter by state
+  out_dt <- out_dt[state == chosen_state]
+  
+  # Columns indices to keep
+  col_indices <- grep(paste0("hospital name|state|^",outcome), colnames(out_dt))
+  
+  # Filtering out unnessecary data 
+  out_dt <- out_dt[, .SD ,.SDcols = col_indices]
+  
+  # Find out what class each column is 
+  # sapply(out_dt,class)
+  out_dt[, outcome] <- out_dt[,  as.numeric(get(outcome))]
+  
+  
+  # Removing Missing Values for numerical datatype (outcome column)
+  out_dt <- out_dt[complete.cases(out_dt),]
+  
+  # Order Column to Top 
+  out_dt <- out_dt[order(get(outcome), `hospital name`)]
+  
+  out_dt <- out_dt[,  .(`hospital name` = `hospital name`, state = state, rate = get(outcome), Rank = .I)]
+  
+  if (num == "best"){
+    return(out_dt[1,`hospital name`])
+  }
+  
+  if (num == "worst"){
+    return(out_dt[.N,`hospital name`])
+  }
+  
+  return(out_dt[num,`hospital name`])
 
-# keep only measurements for mean and standard deviation 
-sel_features <- variable_names[grep(".*mean\\(\\)|std\\(\\)", features[,2], ignore.case = FALSE),]
-x_total      <- x_total[,sel_features[,1]]
-
-# name columns
-colnames(x_total)   <- sel_features[,2]
-colnames(y_total)   <- "activity"
-colnames(sub_total) <- "subject"
-
-# merge final dataset
-total <- cbind(sub_total, y_total, x_total)
-
-# turn activities & subjects into factors 
-total$activity <- factor(total$activity, levels = activity_labels[,1], labels = activity_labels[,2]) 
-total$subject  <- as.factor(total$subject) 
-
-# create a summary independent tidy dataset from final dataset 
-# with the average of each variable for each activity and each subject. 
-total_mean <- total %>% group_by(activity, subject) %>% summarize_all(funs(mean)) 
-
-# export summary dataset
-write.table(total_mean, file = "./tidydata.txt", row.names = FALSE, col.names = TRUE) 
+}
+Part 4 Ranking hospitals in all states (rankall.R)
+rankall <- function(outcome, num = "best") {
+  
+  # Read outcome data
+  out_dt <- data.table::fread('outcome-of-care-measures.csv')
+  
+  outcome <- tolower(outcome)
+  
+  if (!outcome %in% c("heart attack", "heart failure", "pneumonia")) {
+    stop('invalid outcome')
+  }
+  
+  # Renaming Columns to be less verbose and lowercase
+  setnames(out_dt
+           , tolower(sapply(colnames(out_dt), gsub, pattern = "^Hospital 30-Day Death \\(Mortality\\) Rates from ", replacement = "" ))
+  )
+  
+  # Columns indices to keep
+  col_indices <- grep(paste0("hospital name|state|^",outcome), colnames(out_dt))
+  
+  # Filtering out unnessecary data 
+  out_dt <- out_dt[, .SD ,.SDcols = col_indices]
+  
+  # Find out what class each column is 
+  # sapply(out_dt,class)
+  
+  # Change outcome column class
+  out_dt[, outcome] <- out_dt[,  as.numeric(get(outcome))]
+  
+  if (num == "best"){
+    return(out_dt[order(state, get(outcome), `hospital name`)
+    , .(hospital = head(`hospital name`, 1))
+    , by = state])
+  }
+  
+  if (num == "worst"){
+    return(out_dt[order(get(outcome), `hospital name`)
+    , .(hospital = tail(`hospital name`, 1))
+    , by = state])
+  }
+  
+  return(out_dt[order(state, get(outcome), `hospital name`)
+                , head(.SD,num)
+                , by = state, .SDcols = c("hospital name") ])
+  
+}
